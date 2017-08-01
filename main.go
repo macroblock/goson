@@ -32,16 +32,25 @@ const (
 )
 
 func (i item) String() string {
+	prefix := ""
 	switch i.typ {
 	case itemEOF:
-		return "EOF"
+		return "t: EOF"
 	case itemError:
-		return i.val
+		return "t: Error; v: " + i.val
+	case itemText:
+		prefix = "t: Text; "
+	case itemLeftMeta:
+		prefix = "t: LeftMeta; "
+	case itemRightMeta:
+		prefix = "t: RightMeta; "
+	case itemIdentifier:
+		prefix = "t: Identifier; "
 	}
 	if len(i.val) > 10 {
-		return fmt.Sprintf("%.10q...", i.val)
+		return fmt.Sprintf("%s v: %.10q...", prefix, i.val)
 	}
-	return fmt.Sprintf("%q", i.val)
+	return fmt.Sprintf("%s v: %q", prefix, i.val)
 }
 
 // lexer
@@ -86,7 +95,7 @@ func (l *lexer) errorf(format string, args ...interface{}) stateFn {
 
 // emit
 func (l *lexer) emit(t itemType) {
-	fmt.Println(item{t, l.src[l.start:l.pos]})
+	//fmt.Println(item{t, l.src[l.start:l.pos]})
 	l.items <- item{t, l.src[l.start:l.pos]}
 	l.start = l.pos
 }
@@ -137,6 +146,18 @@ func (l *lexer) run() {
 	close(l.items)
 }
 
+func (l *lexer) nextItem() item {
+	for {
+		select {
+		case item := <-l.items:
+			return item
+		default:
+			l.state = l.state(l)
+		}
+	}
+	panic("not reached: nextItem")
+}
+
 func lexOutsideAction(l *lexer) stateFn {
 	for {
 		if strings.HasPrefix(l.src[l.pos:], leftMeta) {
@@ -153,7 +174,6 @@ func lexOutsideAction(l *lexer) stateFn {
 		l.emit(itemText)
 	}
 	l.emit(itemEOF)
-	close(l.items)
 	return nil
 }
 
@@ -174,7 +194,7 @@ func lexIdentifier(l *lexer) stateFn {
 		for r := l.next(); unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'; r = l.next() {
 		}
 	} else {
-		return l.errorf("### it is could not be happened")
+		panic("not reached: lexIdentifier")
 	}
 	l.backup()
 	l.emit(itemIdentifier)
@@ -194,15 +214,20 @@ func lexInsideAction(l *lexer) stateFn {
 		case unicode.IsLetter(r):
 			l.backup()
 			return lexIdentifier
+		default:
+			return l.errorf("unexpected symbol %q", r)
 		}
 	}
 }
 
 func main() {
 	fmt.Println("!!! begin.")
-	_, ch := lex("oops", "test a b c {{d e f someText}} xxx")
-	for ch != nil {
-		fmt.Println("!!! ", <-ch)
+	_, ch := lex("oops", "test a b c {{d e f 1 some_Text}} xxx")
+	for item := range ch {
+		if ch == nil {
+			break
+		}
+		fmt.Println("!!! ", item)
 	}
 	fmt.Println("!!! end.")
 }
